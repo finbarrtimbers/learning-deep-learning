@@ -41,7 +41,7 @@ def get_data(dataset, batch_size, kwargs):
                            ])),
             batch_size=batch_size, shuffle=True, **kwargs)
         test_loader = torch.utils.data.DataLoader(
-            datasets.MNIST('../data', train=False, transform=transforms.Compose([
+            datasets.MNIST('../data', train=False, download=True, transform=transforms.Compose([
                 transforms.ToTensor(),
                 transforms.Normalize((0.1307,), (0.3081,))
             ])),
@@ -56,7 +56,7 @@ def train(epoch, model, train_loader, optimizer, args):
         data, target = Variable(data), Variable(target)
         optimizer.zero_grad()
         output = model(data)
-        loss = F.nll_loss(output, target)
+        loss = nn.CrossEntropyLoss()
         loss.backward()
         optimizer.step()
         if batch_idx % args.log_interval == 0 and args.log_interval >= 0:
@@ -73,13 +73,14 @@ def test(epoch, model, test_loader, args):
             data, target = data.cuda(), target.cuda()
         data, target = Variable(data, volatile=True), Variable(target)
         output = model(data)
-        test_loss += F.nll_loss(output, target).data[0]
+        test_loss += nn.CrossEntropyLoss(output, target).data[0]
+        print("hey")
+        print(output.data)
         pred = output.data.max(1)[1] # get the index of the max log-probability
         correct += pred.eq(target.data).cpu().sum()
-
     test_loss = test_loss
     test_loss /= len(test_loader) # loss function already averages over batch size
-    print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
+    print('Test set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)'.format(
         test_loss, correct, len(test_loader.dataset),
         100. * correct / len(test_loader.dataset)))
     return test_loss
