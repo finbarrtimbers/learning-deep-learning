@@ -2,10 +2,11 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
+*.torch
 # C extensions
 *.so
-
+data/
+checkpoint/
 # Distribution / packaging
 .Python
 env/

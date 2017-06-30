@@ -7,9 +7,98 @@ import os
 import sys
 import time
 import math
-
+import torch
 import torch.nn as nn
 import torch.nn.init as init
+import subprocess
+
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
+from sklearn.externals import joblib
+
+def process_stdin(stdin):
+    return stdin.decode('utf-8').replace('\n', '')
+
+def save_checkpoint(model, acc, epoch, name):
+    state = {
+        'model': model.module if args.cuda else model,
+        'acc': acc,
+        'epoch': epoch
+    }
+    if not os.path.isdir('checkpoint'):
+        os.mkdir('checkpoint')
+    torch.save(state, f"./checkpoint/{name}")
+
+def get_model_name(model):
+    return str(model).replace('\n', '').replace(' ', ''),
+
+def save_model(model, accuracy, loss, epoch, args):
+    base_name = get_model_name(model)
+    timestamp = time.strftime("%Y-%m-%d-%H:%M:%S")
+    if args.git_hash:
+        git_hash = process_stdin(subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]))
+    else:
+        git_hash = 'test'
+    user = process_stdin(subprocess.check_output(["whoami"]))
+    model_identifier = f"{base_name}-{timestamp}-{git_hash}"
+    model_name = f'{model_identifier}.torch'
+    with open('stats/model-stats.csv', 'a') as model_log_file:
+        hyper_params = f"{args.batch_size},{args.epochs},{args.lr},"\
+                       f"{args.momentum},{args.seed}"
+        result_line = f'{model_name},{user},{hyper_params},{accuracy:.2f},{loss:.2f}\n'
+        model_log_file.write(result_line)
+    torch.save(model, model_name)
+    torch.save(model, "model.torch")
+    #plot_roc_curve(model, X_test, y_test, model_identifier)
+    #plot_confusion_matrix(confusion_matrix, ['Annual Giver', 'Major Donor'],
+    #                      model_identifier,
+    #                      title='Confusion matrix')
+
+def plot_roc_curve(model, X_test, y_test, identifier):
+    y_test_probs = [p[1] for p in model.predict_proba(X_test)]
+    fpr, tpr, thresholds = metrics.roc_curve(y_test, y_test_probs)
+    plt.clf()
+    plt.plot(fpr, tpr, color='b')
+    plt.plot(np.linspace(0, 1, 11), np.linspace(0, 1, 11), color='r')
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate (Recall)")
+    plt.savefig(f'model/plots/roc-curve-{identifier}.png', dpi=100)
+
+def plot_confusion_matrix(cm, classes, identifier,
+                          normalize=False,
+                          title='Confusion matrix',
+                          cmap=plt.cm.Blues):
+    """
+    This function prints and plots the confusion matrix.
+    Normalization can be applied by setting `normalize=True`.
+    """
+    plt.clf()
+    plt.figure()
+    plt.imshow(cm, interpolation='nearest', cmap=cmap)
+    plt.title(title)
+    plt.colorbar()
+    tick_marks = np.arange(len(classes))
+    plt.xticks(tick_marks, classes, rotation=45)
+    plt.yticks(tick_marks, classes)
+
+    if normalize:
+        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+        #print("Normalized confusion matrix")
+    #else:
+        #print('Confusion matrix, without normalization')
+    thresh = cm.max() / 2.
+    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+        plt.text(j, i, cm[i, j],
+                 horizontalalignment="center",
+                 color="white" if cm[i, j] > thresh else "black")
+
+    plt.tight_layout()
+    plt.ylabel('True label')
+    plt.xlabel('Predicted label')
+    plt.savefig(f'model/plots/confusion-matrix-{identifier}.png', dpi=100)
+
 
 
 def get_mean_and_std(dataset):

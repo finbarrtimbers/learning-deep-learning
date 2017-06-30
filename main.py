@@ -7,6 +7,8 @@ import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.autograd import Variable
 from models import LeNet
+from utils import progress_bar, save_model
+import os
 
 def get_args():
     # Training settings
@@ -27,6 +29,8 @@ def get_args():
                         help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                         help='how many batches to wait before logging training status')
+    parser.add_argument('--git-hash', type=bool, default=True, metavar='N',
+                        help='whether or not to incldue git hash in model name')
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
     return args
@@ -48,63 +52,93 @@ def get_data(dataset, batch_size, kwargs):
             batch_size=batch_size, shuffle=True, **kwargs)
     return train_loader, test_loader
 
-def train(epoch, model, train_loader, optimizer, args):
+
+
+def train(epoch, model, train_loader, optimizer, criterion, args):
+    print(f"Epoch: {epoch}")
     model.train()
+    train_loss = 0
+    correct = 0
+    total = 0
     for batch_idx, (data, target) in enumerate(train_loader):
         if args.cuda:
             data, target = data.cuda(), target.cuda()
-        data, target = Variable(data), Variable(target)
+        data, targets = Variable(data), Variable(target)
         optimizer.zero_grad()
-        output = model(data)
-        loss = nn.CrossEntropyLoss()
+        outputs = model(data)
+        loss = criterion(outputs, targets)
         loss.backward()
         optimizer.step()
-        if batch_idx % args.log_interval == 0 and args.log_interval >= 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                epoch, batch_idx * len(data), len(train_loader.dataset),
-                100. * batch_idx / len(train_loader), loss.data[0]))
+        train_loss += loss.data[0]
+        _, predicted = torch.max(outputs.data, 1)
+        total += targets.size(0)
+        correct += predicted.eq(targets.data).cpu().sum()
+        batch_loss = train_loss/(batch_idx + 1)
+        batch_acc  = 100. * correct/total
+        progress_bar(batch_idx, len(train_loader),
+                     f"Loss: {batch_loss:.3f} | Acc: {batch_acc:.3f}"
+                     f"({correct}/{total})")
 
-def test(epoch, model, test_loader, args):
+def test(epoch, model, test_loader, criterion, best_acc, args):
     model.eval()
     test_loss = 0
     correct = 0
-    for data, target in test_loader:
+    total = 0
+    for batch_idx, (data, target) in enumerate(test_loader):
         if args.cuda:
             data, target = data.cuda(), target.cuda()
-        data, target = Variable(data, volatile=True), Variable(target)
-        output = model(data)
-        test_loss += nn.CrossEntropyLoss(output, target).data[0]
-        print("hey")
-        print(output.data)
-        pred = output.data.max(1)[1] # get the index of the max log-probability
-        correct += pred.eq(target.data).cpu().sum()
-    test_loss = test_loss
-    test_loss /= len(test_loader) # loss function already averages over batch size
+        data, targets = Variable(data, volatile=True), Variable(target)
+        outputs = model(data)
+        loss = criterion(outputs, targets)
+        test_loss += loss.data[0]
+        _, predicted = torch.max(outputs.data, 1)
+        total += targets.size(0)
+        correct += predicted.eq(targets.data).cpu().sum()
+        batch_loss = test_loss/(batch_idx + 1)
+        batch_acc  = 100. * correct/total
+        progress_bar(batch_idx, len(test_loader),
+                     f"Loss: {batch_loss:.3f} | Acc: {batch_acc:.3f}"
+                     f"({correct}/{total})")
+    # Save checkpoint
+    acc = 100. * correct/total
+    if acc > best_acc:
+        print('Saving...')
+        state = {
+            'model': model.module if args.cuda else model,
+            'acc': acc,
+            'epoch': epoch,
+        }
+        if not os.path.isdir('checkpoint'):
+            os.mkdir('checkpoint')
+        torch.save(state, './checkpoint/ckpt.t7')
+        best_acc = acc
+    test_loss = test_loss / len(test_loader)
     print('Test set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)'.format(
         test_loss, correct, len(test_loader.dataset),
         100. * correct / len(test_loader.dataset)))
-    return test_loss
+    return best_acc, test_loss
 
 def main():
     args = get_args()
     torch.manual_seed(args.seed)
     if args.cuda:
         torch.cuda.manual_seed(args.seed)
-
     kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}
     train_loader, test_loader = get_data('MNIST', args.batch_size, kwargs)
-
     model = LeNet()
+    print(str(model).replace('\n', '').replace(' ', ''))
     if args.cuda:
         model.cuda()
-
+    criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
     test_losses = []
+    best_acc = 0
     for epoch in range(1, args.epochs + 1):
-        train(epoch, model, train_loader, optimizer, args)
-        test_loss = test(epoch, model, test_loader, args)
+        train(epoch, model, train_loader, optimizer, criterion, args)
+        best_acc, test_loss = test(epoch, model, test_loader, criterion, best_acc,
+                                   args)
         test_losses.append(test_loss)
-    #save_model(mode
+    save_model(model, best_acc, test_loss, epoch, args)
 
 if __name__ == '__main__':
     main()
